@@ -1,0 +1,71 @@
+---
+- name: create group
+  group:
+    name: postgres
+    state: present
+
+- name: create postgres user
+  user:
+    name: postgres
+    comment: postgres user
+    group: postgres
+    shell: /bin/bash
+    createhome: yes
+    password: "{{ 'postgres' | password_hash('sha512') }}"
+    state: present
+
+- name: Create PostgreSQL Repository
+  yum:
+    name: https://download.postgresql.org/pub/repos/yum/10/redhat/rhel-7-x86_64/pgdg-centos10-10-2.noarch.rpm
+    state: present
+
+- name: Install PostgreSQL
+  yum:
+    name: "{{ item }}"
+    state: latest
+  with_items:
+    - postgresql10
+    - postgresql10-server
+    - python-psycopg2
+
+- name: Initialize DB
+  shell: /bin/bash -lc "/usr/pgsql-10/bin/postgresql-10-setup initdb"
+  args:
+    creates: /var/lib/pgsql/10/data/postgresql.conf
+  become: postgres
+  register: _init_result
+
+- name: Configure to Accept access from others postgresql.conf
+  lineinfile:
+    path: "/var/lib/pgsql/10/data/postgresql.conf"
+    state: present
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  with_items:
+    - {regexp: '^#listen_addresses = ', line: "listen_addresses = '*'"}
+    - {regexp: '^#port = 5432', line: 'port = 5432'}
+
+- name: Configure to Accept access from others hba_conf
+  lineinfile:
+    path: "/var/lib/pgsql/10/data/pg_hba.conf"
+    state: present
+    line: "{{ item.line }}"
+  with_items:
+    - {line: 'host all all 0.0.0.0/0 trust'}
+
+
+- name: Configure to access by password
+  lineinfile:
+    path: "/var/lib/pgsql/10/data/pg_hba.conf"
+    state: present
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  with_items:
+    - {regexp: '^local   all             all                                     peer', line: "local all all trust"}
+
+- name: start postgreSQL
+  systemd:
+    name: postgresql-10
+    state: started
+    enabled: yes
+
